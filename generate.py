@@ -10,6 +10,7 @@ warnings.filterwarnings('ignore')
 import random
 
 import torch
+import torch_npu
 import torch.distributed as dist
 from PIL import Image
 
@@ -253,10 +254,10 @@ def generate(args):
             f"offload_model is not specified, set to {args.offload_model}.")
     cfg = WAN_CONFIGS[args.task]
 
+    torch.npu.set_device(local_rank)
     if world_size > 1:
-        torch.cuda.set_device(local_rank)
         dist.init_process_group(
-            backend="nccl",
+            backend="hccl",
             init_method="env://",
             rank=rank,
             world_size=world_size)
@@ -309,7 +310,7 @@ def generate(args):
 
     del video
 
-    torch.cuda.synchronize()
+    torch.npu.synchronize()
     if dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()

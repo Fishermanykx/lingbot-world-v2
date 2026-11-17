@@ -6,7 +6,7 @@ def init_distributed_group():
     """r initialize sequence parallel group.
     """
     if not dist.is_initialized():
-        dist.init_process_group(backend='nccl')
+        dist.init_process_group(backend='hccl')
 
 
 def get_rank():
@@ -25,7 +25,13 @@ def all_to_all(x, scatter_dim, gather_dim, group=None, **kwargs):
     if world_size > 1:
         inputs = [u.contiguous() for u in x.chunk(world_size, dim=scatter_dim)]
         outputs = [torch.empty_like(u) for u in inputs]
-        dist.all_to_all(outputs, inputs, group=group, **kwargs)
+        if x.device.type == "npu":
+            packed = torch.stack(inputs)
+            received = torch.empty_like(packed)
+            dist.all_to_all_single(received, packed, group=group, **kwargs)
+            outputs = received.unbind()
+        else:
+            dist.all_to_all(outputs, inputs, group=group, **kwargs)
         x = torch.cat(outputs, dim=gather_dim).contiguous()
     return x
 

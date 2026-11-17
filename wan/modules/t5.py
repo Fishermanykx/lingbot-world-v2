@@ -473,10 +473,11 @@ class T5EncoderModel:
         self,
         text_len,
         dtype=torch.bfloat16,
-        device=torch.cuda.current_device(),
+        device=torch.device('cpu'),
         checkpoint_path=None,
         tokenizer_path=None,
         shard_fn=None,
+        weight_loader=None,
     ):
         self.text_len = text_len
         self.dtype = dtype
@@ -489,9 +490,13 @@ class T5EncoderModel:
             encoder_only=True,
             return_tokenizer=False,
             dtype=dtype,
-            device=device).eval().requires_grad_(False)
+            device=device if weight_loader is None else "meta").eval().requires_grad_(False)
         logging.info(f'loading {checkpoint_path}')
-        model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+        if weight_loader is None:
+            model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+        else:
+            weight_loader(model, checkpoint_path)
+            model.to(dtype=dtype)
         self.model = model
         if shard_fn is not None:
             self.model = shard_fn(self.model, sync_module_states=False)

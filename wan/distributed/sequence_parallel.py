@@ -29,6 +29,8 @@ def rope_apply(x, grid_sizes, freqs):
     grid_sizes: [B, 3].
     freqs:      [M, C // 2].
     """
+    if x.device.type == "npu":
+        return rope_apply(x.cpu(), grid_sizes.cpu(), freqs.cpu()).to(x.device)
     s, n, c = x.size(1), x.size(2), x.size(3) // 2
     # split freqs
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
@@ -65,6 +67,8 @@ def rope_apply(x, grid_sizes, freqs):
 
 @torch.amp.autocast('cuda', enabled=False)
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
+    if x.device.type == "npu":
+        return causal_rope_apply(x.cpu(), grid_sizes.cpu(), freqs.cpu(), start_frame).to(x.device)
     n, c = x.size(2), x.size(3) // 2
 
     # split freqs
@@ -95,6 +99,18 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
     return torch.stack(output).type_as(x)
 
 
+def _fp32_module_call(module, inputs):
+    # FSDP exposes BF16 parameters inside forward. Keep the time MLP
+    # arithmetic in FP32 even under the outer NPU BF16 autocast.
+    for layer in module:
+        if isinstance(layer, torch.nn.Linear):
+            bias = layer.bias.float() if layer.bias is not None else None
+            inputs = torch.nn.functional.linear(inputs, layer.weight.float(), bias)
+        else:
+            inputs = layer(inputs)
+    return inputs
+
+
 def sp_dit_forward(
     self,
     x,
@@ -113,7 +129,7 @@ def sp_dit_forward(
         assert y is not None
     # params
     device = self.patch_embedding.weight.device
-    if self.freqs.device != device:
+    if device.type != 'npu' and self.freqs.device != device:
         self.freqs = self.freqs.to(device)
 
     if y is not None:
@@ -137,10 +153,16 @@ def sp_dit_forward(
     with torch.amp.autocast('cuda', dtype=torch.float32):
         bt = t.size(0)
         t = t.flatten()
-        e = self.time_embedding(
+        time_input = (
             sinusoidal_embedding_1d(self.freq_dim,
                                     t).unflatten(0, (bt, seq_len)).float())
-        e0 = self.time_projection(e).unflatten(2, (6, self.dim))
+        if device.type == "npu":
+            with torch.amp.autocast("npu", enabled=False):
+                e = _fp32_module_call(self.time_embedding, time_input)
+                e0 = _fp32_module_call(self.time_projection, e).unflatten(2, (6, self.dim))
+        else:
+            e = self.time_embedding(time_input)
+            e0 = self.time_projection(e).unflatten(2, (6, self.dim))
         assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
     # context
@@ -291,7 +313,7 @@ def sp_dit_forward_causal(
         assert y is not None
     # params
     device = self.patch_embedding.weight.device
-    if self.freqs.device != device:
+    if device.type != 'npu' and self.freqs.device != device:
         self.freqs = self.freqs.to(device)
 
     if y is not None:
@@ -323,10 +345,16 @@ def sp_dit_forward_causal(
     with torch.amp.autocast('cuda', dtype=torch.float32):
         bt = t.size(0)
         t = t.flatten()
-        e = self.time_embedding(
+        time_input = (
             sinusoidal_embedding_1d(self.freq_dim,
                                     t).unflatten(0, (bt, padded_seq_lens)).float())
-        e0 = self.time_projection(e).unflatten(2, (6, self.dim))
+        if device.type == "npu":
+            with torch.amp.autocast("npu", enabled=False):
+                e = _fp32_module_call(self.time_embedding, time_input)
+                e0 = _fp32_module_call(self.time_projection, e).unflatten(2, (6, self.dim))
+        else:
+            e = self.time_embedding(time_input)
+            e0 = self.time_projection(e).unflatten(2, (6, self.dim))
         assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
     # context

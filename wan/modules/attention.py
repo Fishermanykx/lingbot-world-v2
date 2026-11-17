@@ -48,6 +48,10 @@ def flash_attention(
     deterministic:  bool. If True, slightly slower and uses more memory.
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
+    if q.device.type == "npu":
+        from ..ascend import npu_attention
+
+        return npu_attention(q, k, v, q_lens, k_lens, dropout_p, softmax_scale, q_scale, causal, window_size, dtype)
     half_dtypes = (torch.float16, torch.bfloat16)
     assert dtype in half_dtypes
     assert q.device.type == 'cuda' and q.size(-1) <= 256
@@ -144,7 +148,7 @@ def attention(
     dtype=torch.bfloat16,
     fa_version=None,
 ):
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    if q.device.type == 'npu' or FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
         return flash_attention(
             q=q,
             k=k,
