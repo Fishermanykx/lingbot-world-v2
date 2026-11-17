@@ -1,0 +1,15 @@
+{
+  "prompt": "A serene lakeside scene with a lone tree standing in calm water, surrounded by distant snow-capped mountains under a bright blue sky with drifting white clouds \u2014 gentle ripples reflect the tree and sky, creating a tranquil, meditative atmosphere.",
+  "image": "/mnt/share/workspace/lingbot-world-v2/examples/03/image.jpg",
+  "num_chunks": 17,
+  "frames_per_block": 4,
+  "flow_shift": 10.0,
+  "height": 464,
+  "width": 832,
+  "fps": 16,
+  "seed": 42,
+  "extra_params": {
+    "action_path": "03",
+    "camera_action_script": null
+  }
+}
